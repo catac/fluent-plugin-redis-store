@@ -17,19 +17,21 @@ module Fluent::Plugin
     config_param :timeout,   :float,   :default => 5.0
 
     # redis command and parameters
-    config_param :format_type,       :string,  :default => 'json'
-    config_param :store_type,        :string,  :default => 'zset'
-    config_param :key_prefix,        :string,  :default => ''
-    config_param :key_suffix,        :string,  :default => ''
-    config_param :key,               :string,  :default => nil
-    config_param :key_path,          :string,  :default => nil
-    config_param :score_path,        :string,  :default => nil
-    config_param :value_path,        :string,  :default => ''
-    config_param :key_expire,        :integer, :default => -1
-    config_param :value_expire,      :integer, :default => -1
-    config_param :value_length,      :integer, :default => -1
-    config_param :order,             :string,  :default => 'asc'
-    config_param :collision_policy,  :string,  :default => nil
+    config_param :format_type,          :string,  :default => 'json'
+    config_param :store_type,           :string,  :default => 'zset'
+    config_param :key_prefix,           :string,  :default => ''
+    config_param :key_suffix,           :string,  :default => ''
+    config_param :key,                  :string,  :default => nil
+    config_param :key_path,             :string,  :default => nil
+    config_param :score_path,           :string,  :default => nil
+    config_param :value_path,           :string,  :default => ''
+    config_param :key_expire,           :integer, :default => -1
+    config_param :value_expire,         :integer, :default => -1
+    config_param :value_length,         :integer, :default => -1
+    config_param :order,                :string,  :default => 'asc'
+    config_param :congestion_threshold, :integer, :default => 0
+    config_param :congestion_interval,  :integer, :default => 1
+    config_param :collision_policy,     :string,  :default => nil
     config_set_default :flush_interval, 1
 
     config_section :buffer do
@@ -60,6 +62,7 @@ module Fluent::Plugin
         @redis = Redis.new(:host => @host, :port => @port, :password => @password,
                            :timeout => @timeout, :thread_safe => true, :db => @db)
       end
+      @congestion_check_time = Time.now.to_i
     end
 
     def shutdown
@@ -79,7 +82,30 @@ module Fluent::Plugin
       true
     end
 
+    def congestion_check(key)
+      return if @congestion_threshold == 0
+      # Check congestion only if enough time has passed since last check
+      if (Time.now.to_i - @congestion_check_time) >= @congestion_interval
+        # Don't push event to Redis key which has reached @congestion_threshold
+        while @redis.llen(key) >= @congestion_threshold
+          log.warn "Redis key size has hit a congestion threshold " \
+            "#{@congestion_threshold} suspending output for " \
+            "#{@congestion_interval} seconds"
+          sleep @congestion_interval
+        end
+        @congestion_check_time = Time.now.to_i
+      end
+    end
+
     def write(chunk)
+      # For lists where key is predefined, perform a naive congestion check
+      # before buffering over chunks of messages. The check is placed here
+      # primarily to get around @redis.llen cmd not being ready inside pipeline
+      # Downside is that you may exceed congestion_threshold by messages length -1
+      if @key and @store_type == 'list'
+        congestion_check(@key)
+      end
+
       @redis.pipelined {
         chunk.open { |io|
           begin

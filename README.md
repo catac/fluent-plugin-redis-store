@@ -137,9 +137,13 @@ No more options than common options.
 
 ### `list` storage specific options
 
-| Key     | Type   | Default                  | Description                         |
-| :----   | :----- | :----------------------- | :------------                       |
-| `order` | string | asc                      | `asc`: **rpush**, `desc`: **lpush** |
+| Key                    | Type    | Default                  | Description                                            |
+| :--------------------- | :------ | :----------------------- | :------------                                          |
+| `order`                | string  | asc                      | `asc`: **rpush**, `desc`: **lpush**                    |
+| `congestion_threshold` | integer | 0                        | see Note below                                         |
+| `congestion_interval`  | integer | 1                        | How often to check for congestion. Default is 1 second |
+
+Note: In case Redis data_type is “list” and has more than @congestion_threshold items, block until someone consumes them and reduces congestion, otherwise if there are no consumers Redis will run out of memory, unless it was configured with OOM protection. But even with OOM protection, a single Redis list can block all other users of Redis, until Redis CPU consumption reaches the max allowed RAM size. A default value of 0 means that this limit is disabled. Only supported for list Redis data_type.
 
 ### `set` storage specific options
 
