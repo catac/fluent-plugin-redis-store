@@ -237,12 +237,25 @@ module Fluent::Plugin
       value = traverse(record, @value_path)
       case @format_type
       when 'json'
+        value = sanitize_strings(value)
         value.to_json
       when 'msgpack'
         value.to_msgpack
       else
         value
       end
+    end
+
+    def sanitize_strings(object)
+      if object.is_a? String
+        return object.encode('UTF-8', invalid: :replace, undef: :replace, replace: '?')
+      end
+      if object.is_a? Hash
+        object.each { |key,value|
+          object[key] = sanitize_strings(value)
+        }
+      end
+      return object
     end
 
     def get_score_from(record, time)
